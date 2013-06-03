@@ -220,11 +220,15 @@ template<typename PointT>
     if (cloud->size() == 0)
       return; // KdTreeSearch::setInputCloud will segfault if too few points are present.
 
+    typename pcl::search::KdTree<PointT>::Ptr tree (new typename pcl::search::KdTree<PointT>);
+    tree->setInputCloud (cloud);
+
     std::vector<typename pcl::PointIndices> cluster_indices;
     pcl::EuclideanClusterExtraction<PointT> ec;
     ec.setClusterTolerance(clusterTolerance);
     ec.setMinClusterSize(minClusterSize);
     ec.setMaxClusterSize(maxClusterSize);
+    ec.setSearchMethod (tree);
     ec.setInputCloud(cloud);
     ec.extract(cluster_indices);
 

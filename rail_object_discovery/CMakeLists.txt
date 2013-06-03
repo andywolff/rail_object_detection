@@ -29,6 +29,6 @@ rosbuild_gensrv()
 #rosbuild_add_executable(example examples/example.cpp)
 #target_link_libraries(example ${PROJECT_NAME})
 
-rosbuild_add_executable(update_environment_server src/update_environment_service.cpp)
+#rosbuild_add_executable(update_environment_server src/update_environment_service.cpp)
 rosbuild_add_executable(discover_objects_server src/discover_objects_server.cpp)
 

@@ -9,6 +9,7 @@
  *  4) The collision map is provided with a filtered static environment point cloud for processing.
  * 
  * \author Paul Malmsten, WPI - pmalmsten@gmail.com
+ * \author Tim Jenkel, WPI - timj91@wpi.edu
  * \date Sep 21, 2012
  */
 
@@ -57,12 +58,37 @@ bool add_cloud_bounding_box_to_collision_environment(const rail_object_discovery
   objectMsg.header.stamp = ros::Time::now();
   objectMsg.header.frame_id = boundingBoxRequest.response.pose.header.frame_id;
 
+  // If the ratio of of the bounding box's dimensions are below the threshold, consider it a cylinder
+  double objectSizeRatio = boundingBoxRequest.response.box_dims.x / boundingBoxRequest.response.box_dims.y;
+  ROS_INFO_STREAM("Object size ratio: " << objectSizeRatio);
+
   arm_navigation_msgs::Shape object;
-  object.type = arm_navigation_msgs::Shape::BOX;
-  object.dimensions.resize(3);
-  object.dimensions[0] = boundingBoxRequest.response.box_dims.x;
-  object.dimensions[1] = boundingBoxRequest.response.box_dims.y;
-  object.dimensions[2] = boundingBoxRequest.response.box_dims.z;
+  if(namedCloud.name.find("object_") != std::string::npos
+     && objectSizeRatio < 1.3) {
+    // Set the collision object shape to a cylinder
+    ROS_INFO("Interpreting object as cylinder");
+    object.type = arm_navigation_msgs::Shape::CYLINDER;
+    object.dimensions.resize(2);
+    object.dimensions[0] = 0.25 * (boundingBoxRequest.response.box_dims.x + boundingBoxRequest.response.box_dims.y);
+    object.dimensions[1] = boundingBoxRequest.response.box_dims.z;
+  }
+  else {
+    // Set the collision object shape to a box
+    object.type = arm_navigation_msgs::Shape::BOX;
+    object.dimensions.resize(3);
+    object.dimensions[0] = boundingBoxRequest.response.box_dims.x;
+    object.dimensions[1] = boundingBoxRequest.response.box_dims.y;
+    
+    // If it is a surface, reduce the bounding box's height
+    if(namedCloud.name.find("surface_") != std::string::npos 
+       && boundingBoxRequest.response.box_dims.x > boundingBoxRequest.response.box_dims.z
+       && boundingBoxRequest.response.box_dims.y > boundingBoxRequest.response.box_dims.z)
+      object.dimensions[2] = 0.005;
+    else
+      object.dimensions[2] = boundingBoxRequest.response.box_dims.z;
+  }
+  
+  // Add the shape to the message
   objectMsg.shapes.push_back(object);
   objectMsg.poses.push_back(boundingBoxRequest.response.pose.pose);
 
@@ -90,8 +116,10 @@ bool update_environment_callback(rail_object_discovery::UpdateEnvironment::Reque
   arm_navigation_msgs::CollisionObject clearAllObjectsMsg;
   clearAllObjectsMsg.operation.operation = arm_navigation_msgs::CollisionObjectOperation::REMOVE;
   clearAllObjectsMsg.id = "all";
+  clearAllObjectsMsg.header.stamp = ros::Time::now();
+  clearAllObjectsMsg.header.frame_id = request.static_environment.header.frame_id;
   collision_object_publisher.publish(clearAllObjectsMsg);
-
+  
   // Name each object and add it to the planning environment
   for (std::vector<sensor_msgs::PointCloud2>::size_type i = 0; i < request.objects.size(); i++)
   {
@@ -109,7 +137,7 @@ bool update_environment_callback(rail_object_discovery::UpdateEnvironment::Reque
     if (!add_cloud_bounding_box_to_collision_environment(namedCloud))
       return false;
   }
-
+  
   // Name each surface and add it to the planning environment
   for (std::vector<sensor_msgs::PointCloud2>::size_type i = 0; i < request.surfaces.size(); i++)
   {

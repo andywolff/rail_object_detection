@@ -68,6 +68,8 @@ struct object_filter : public std::unary_function<pcl::PointCloud<pcl::PointXYZR
 bool extract(rail_pcl_object_segmentation::ExtractObjects::Request &req,
              rail_pcl_object_segmentation::ExtractObjects::Response &res)
 {
+  ROS_INFO("Recieved extract object service request");
+
   //convert to pcl pointcloud
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr pclCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
   pcl::fromROSMsg(req.cloud, *pclCloud);

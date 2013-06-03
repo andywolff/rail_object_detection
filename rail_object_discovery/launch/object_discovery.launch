@@ -10,7 +10,7 @@
 	<arg name="target_frame_id" />
 	
 	<!-- Argument for dynamic inputs to planning_environment -->
-	<arg name="collision_object_topic" />
+<!--	<arg name="collision_object_topic" /> -->
 	
 	<!-- Run bounding box finder service-->
 	<node pkg="object_manipulator" 
@@ -23,14 +23,14 @@
 		  name="extract_objects_server" />
 		  
 	<!-- Run environment update service -->
-	<node pkg="rail_object_discovery"
+<!--	<node pkg="rail_object_discovery"
 		  type="update_environment_server"
 		  name="update_environment_server"
 		  if="$(arg update_environment)">
 		<param name="~output/filtered_env_cloud_topic_name" value="static_environment_filtered" />
 		<param name="~output/collision_object_topic_name" value="$(arg collision_object_topic)" />
 	</node>
-
+-->
 	<!-- Run object discovery main service -->
 	<node pkg="rail_object_discovery"
 	      type="discover_objects_server" 

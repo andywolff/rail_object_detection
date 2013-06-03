@@ -6,8 +6,8 @@
 	<arg name="update_environment" default="true" />
 
 	<!-- Arguments for sensor -->
-	<arg name="sensor_topic" />
-	<arg name="target_frame_id" />
+	<arg name="sensor_topic" default="camera/depth_registered/points"/>
+	<arg name="target_frame_id" default="base_link"/>
 	
 	<!-- Argument for dynamic inputs to planning_environment -->
 <!--	<arg name="collision_object_topic" /> -->

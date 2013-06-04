@@ -3,10 +3,10 @@
 	<arg name="update_state_cloud_timestamps" default="false" />
 	
 	<!-- Whether the planning_environment should be updated with discovered objects or not -->
-	<arg name="update_environment" default="true" />
+	<arg name="update_environment" default="false" />
 
 	<!-- Arguments for sensor -->
-	<arg name="sensor_topic" default="camera/depth_registered/points"/>
+	<arg name="sensor_topic" default="openni/depth_registered/points"/>
 	<arg name="target_frame_id" default="base_link"/>
 	
 	<!-- Argument for dynamic inputs to planning_environment -->
@@ -15,17 +15,20 @@
 	<!-- Run bounding box finder service-->
 	<node pkg="object_manipulator" 
 		  type="cluster_bounding_box_finder_server.py" 
-		  name="bounding_box_finder" />
+		  name="bounding_box_finder"
+                  output="screen" />
 		  
     <!-- Run object detection service -->
     <node pkg="rail_pcl_object_segmentation"
 		  type="extract_objects_server" 
-		  name="extract_objects_server" />
+		  name="extract_objects_server"
+                  output="screen" />
 		  
 	<!-- Run environment update service -->
 <!--	<node pkg="rail_object_discovery"
 		  type="update_environment_server"
 		  name="update_environment_server"
+                  output="screen"
 		  if="$(arg update_environment)">
 		<param name="~output/filtered_env_cloud_topic_name" value="static_environment_filtered" />
 		<param name="~output/collision_object_topic_name" value="$(arg collision_object_topic)" />
@@ -34,7 +37,8 @@
 	<!-- Run object discovery main service -->
 	<node pkg="rail_object_discovery"
 	      type="discover_objects_server" 
-	      name="rail_object_discovery" >
+	      name="rail_object_discovery" 
+              output="screen">
 	    <param name="~update_environment" value="$(arg update_environment)" />
 	    <param name="~update_old_cloud_timestamps" value="$(arg update_state_cloud_timestamps)" />
 		<param name="~sensor_topic" value="$(arg sensor_topic)" /> 

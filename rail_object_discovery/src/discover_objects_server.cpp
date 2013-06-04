@@ -31,6 +31,12 @@
 
 #define TF_BUFFER_DURATION_SECS 10
 
+#define MAX_OBJECTS 4
+#define MAX_PLANES 3
+ros::Publisher object_pubs[MAX_OBJECTS];
+ros::Publisher plane_pubs[MAX_PLANES];
+//the above are used when not communicating with the planning scene
+
 std::string sensor_topic_name, target_frame_id, extract_objects_service_name, update_environment_service_name;
 bool update_cloud_timestamp_if_too_old, should_update_enviroment;
 
@@ -41,10 +47,13 @@ sensor_msgs::PointCloud2::ConstPtr pointCloud;
 bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &req,
                                rail_object_discovery::DiscoverObjects::Response &res)
 {
+  ROS_INFO("Beginning discover_objects_callback");
+
   sensor_msgs::PointCloud2 transformedCloud;
+
   ros::Time tfTimestamp = pointCloud->header.stamp;
 
-  // Check whether incoming pointcloud is marked as too old
+  ROS_INFO("Checking whether incoming pointcloud is marked as too old");
   if ((ros::Time::now() - ros::Duration(TF_BUFFER_DURATION_SECS - 1)) > pointCloud->header.stamp)
     {
       if (update_cloud_timestamp_if_too_old)
@@ -80,6 +89,7 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
   
   //call extract objects server
   ros::NodeHandle n;
+  ros::Rate loop_rate(10);
 
   ros::ServiceClient client = n.serviceClient<rail_pcl_object_segmentation::ExtractObjects>(
       extract_objects_service_name);
@@ -90,12 +100,11 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
   extract_srv.request.constraints = req.constraints;
   extract_srv.request.plane_slope_tolerance = req.plane_slope_tolerance;
 
-  ROS_WARN("Segmenting image...");
+  ROS_INFO("Segmenting image...");
   if (client.call(extract_srv))
   { //successful
     if (should_update_enviroment)
     {
-/*
       //Call environment server
       ROS_INFO("Updating environment...");
       ros::ServiceClient env_client = n.serviceClient<rail_object_discovery::UpdateEnvironment>(
@@ -104,51 +113,8 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
       rail_object_discovery::UpdateEnvironment env_srv;
       env_srv.request.static_environment = transformedCloud;
       env_srv.request.objects = extract_srv.response.clouds;
-*/
-      //get the number of planes
-      int i=0;
-      for (std::vector<rail_pcl_object_segmentation::DiscoveredPlane>::iterator it =
-          extract_srv.response.planes.begin(); it != extract_srv.response.planes.end(); ++it)
-      {
-         i++;
-      }
-      ROS_ERROR("extracted %d planes", i);
-      //initialize a publisher for each plane
-/*      ros::Publisher obj_cloud_pub[i];
-      rail_object_discovery::NamedPointCloud2 planes[i];
-      i=0;
-      for (std::vector<rail_pcl_object_segmentation::DiscoveredPlane>::iterator it =
-          extract_srv.response.planes.begin(); it != extract_srv.response.planes.end(); ++it)
-      {
-        std::stringstream ss;
-        ss << "extracted_objects/plane_" << i;
-        obj_cloud_pub[i] = n.advertise<sensor_msgs::PointCloud2>(ss.str(), 1);
-        planes[i].name=ss.str();
-        i++;
-      }
-      // Copy plane point clouds for naming
-      i=0;
-      for (std::vector<rail_pcl_object_segmentation::DiscoveredPlane>::iterator it =
-          extract_srv.response.planes.begin(); it != extract_srv.response.planes.end(); ++it)
-      {
-          obj_cloud_pub[i++].publish((*it).planeCloud);
-          planes[i].cloud=(*it).planeCloud;
-//        env_srv.request.surfaces.push_back((*it).planeCloud);
-      }
-*/
-      //do the same for objects
-      i=0;
-      for (std::vector<sensor_msgs::PointCloud2>::iterator it =
-          extract_srv.response.clouds.begin(); it != extract_srv.response.clouds.end(); ++it)
-      {
-         i++;
-      }
-      
 
-      ROS_ERROR("extracted %d objects", i);
-
-      return true;
-/*      if (env_client.call(env_srv))
+      if (env_client.call(env_srv))
       {
         ROS_INFO("Service call complete.");
         // Return named clouds
@@ -162,25 +128,38 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
         ROS_ERROR("Failed to call environment service");
         return false;
       }
-*/
     }
     else
     {
-      // Return clouds w/o names
+      // Return clouds
+      int i = 0;
       for (std::vector<sensor_msgs::PointCloud2>::iterator it = extract_srv.response.clouds.begin();
           it != extract_srv.response.clouds.end(); ++it)
       {
         rail_object_discovery::NamedPointCloud2 namedCloud;
         namedCloud.cloud = *it; // Copy point cloud
+        std::stringstream ss;
+        ss << "/extract_objects/object_" << i;
+        namedCloud.name = ss.str();
+	object_pubs[i].publish(namedCloud.cloud);
+	ROS_INFO_STREAM("published an object to " << ss.str());
+	i++;
         res.objects.push_back(namedCloud);
       }
 
-      // Return surfaces w/o names
+      i = 0;
+      // Return surfaces
       for (std::vector<rail_pcl_object_segmentation::DiscoveredPlane>::iterator it =
           extract_srv.response.planes.begin(); it != extract_srv.response.planes.end(); ++it)
       {
         rail_object_discovery::NamedPointCloud2 namedCloud;
         namedCloud.cloud = (*it).planeCloud; // Copy point cloud
+        std::stringstream ss;
+        ss << "/extract_objects/plane_" << i;
+        namedCloud.name = ss.str();
+	plane_pubs[i].publish(namedCloud.cloud);
+	i++;
+	ROS_INFO_STREAM("published a plane to " << ss.str());
         res.surfaces.push_back(namedCloud);
       }
 
@@ -205,6 +184,19 @@ int main(int argc, char **argv)
   ros::init(argc, argv, "discover_objects_server");
   ros::NodeHandle priv("~");
   ros::NodeHandle n;
+
+  //generate a publisher for each object and plane
+  int i;
+  for (i=0; i<MAX_OBJECTS; i++) {
+	std::stringstream ss;
+        ss << "/extract_objects/object_" << i;
+	object_pubs[i]=n.advertise<sensor_msgs::PointCloud2>(ss.str(),1);
+  }
+  for (i=0; i<MAX_PLANES; i++) {
+	std::stringstream ss;
+        ss << "/extract_objects/plane_" << i;
+	plane_pubs[i]=n.advertise<sensor_msgs::PointCloud2>(ss.str(),1);
+  }
 
   // Required parameters
   if (!priv.getParam("sensor_topic", sensor_topic_name))

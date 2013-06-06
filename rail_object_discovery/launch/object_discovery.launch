@@ -1,6 +1,6 @@
 <launch>
 	<!-- Whether old cloud timestamps should be overwritten with ros::Time::now() or not-->
-	<arg name="update_state_cloud_timestamps" default="false" />
+	<arg name="update_state_cloud_timestamps" default="true" />
 	
 	<!-- Whether the planning_environment should be updated with discovered objects or not -->
 	<arg name="update_environment" default="false" />

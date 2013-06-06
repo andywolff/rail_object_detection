@@ -31,8 +31,8 @@
 
 #define TF_BUFFER_DURATION_SECS 10
 
-#define MAX_OBJECTS 4
-#define MAX_PLANES 3
+#define MAX_OBJECTS 10
+#define MAX_PLANES 10
 ros::Publisher object_pubs[MAX_OBJECTS];
 ros::Publisher plane_pubs[MAX_PLANES];
 //the above are used when not communicating with the planning scene

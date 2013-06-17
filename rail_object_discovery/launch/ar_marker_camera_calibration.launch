@@ -1,0 +1,17 @@
+<launch>
+	<arg name="marker_pattern" default="$(find ar_pose)/data/patt.hiro"/>
+	<arg name="marker_width" default="80.0"/>
+
+        <node name="ar_pose" pkg="ar_pose" type="ar_single" respawn="false" output="screen" >
+                <param name="marker_pattern" type="string" value="$(arg marker_pattern)"/>
+                <param name="marker_width" type="double" value="$(arg marker_width)"/>
+                <param name="marker_center_x" type="double" value="0.0"/>
+                <param name="marker_center_y" type="double" value="0.0"/>
+                <param name="threshold" type="int" value="100"/>
+                <param name="use_history" type="bool" value="true"/>
+	</node>
+
+	<!-- a node which publishes openni_pose based on the difference between ar_marker and ar_marker_fixed, as well as the pose of the gripper -->
+        <node name="ar_camera_calibrator" pkg="rail_object_discovery" type="ar_camera_calibrator" output="screen" />
+
+</launch>

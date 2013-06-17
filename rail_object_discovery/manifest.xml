@@ -18,6 +18,8 @@
   
   <!-- Package dependencies -->
   <depend package="roscpp"/>
+  <depend package="tf"/>
+  <depend package="std_srvs"/>
   <depend package="sensor_msgs"/> <!-- Defines PointCloud2 -->
  <!-- <depend package="arm_navigation_msgs" /> --> <!-- Defines CollisionObject -->
 <!--  <depend package="object_manipulation_msgs"/> --><!-- Defines GraspableObject -->

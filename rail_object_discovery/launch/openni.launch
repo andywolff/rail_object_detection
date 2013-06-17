@@ -4,7 +4,7 @@
   <node name="hold_XnSensorServer" pkg="rail_object_discovery" type="always_run_XnSensorServer.sh" output="screen" />
 
   <include file="$(find openni_launch)/launch/openni.launch">
-    <arg name="camera" value="openni" />
+    <arg name="camera" value="xtion" />
     <arg name="depth_registration" value="true" />
   </include>
 </launch>

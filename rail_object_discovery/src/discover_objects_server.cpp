@@ -20,6 +20,7 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <std_msgs/String.h>
 #include <pcl_ros/transforms.h>
+#include <pcl/io/pcd_io.h>
 
 #include <rail_pcl_object_segmentation/ExtractObjects.h>
 #include <rail_pcl_object_segmentation/ObjectConstraints.h>
@@ -29,27 +30,36 @@
 
 #include "rail_object_discovery/NamedPointCloud2.h"
 
+#include "tf/transform_datatypes.h"
+
 #define TF_BUFFER_DURATION_SECS 10
 
 #define MAX_OBJECTS 10
 #define MAX_PLANES 10
 ros::Publisher object_pubs[MAX_OBJECTS];
 ros::Publisher plane_pubs[MAX_PLANES];
-//the above are used when not communicating with the planning scene
+ros::Publisher environment_pub;
 
 std::string sensor_topic_name, target_frame_id, extract_objects_service_name, update_environment_service_name;
-bool update_cloud_timestamp_if_too_old, should_update_enviroment;
+bool update_cloud_timestamp_if_too_old, should_update_environment;
 
 tf::TransformListener* tf_listener;
 
 sensor_msgs::PointCloud2::ConstPtr pointCloud;
 
+bool received_pointCloud=false;
+
 bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &req,
                                rail_object_discovery::DiscoverObjects::Response &res)
 {
+  if (!received_pointCloud) {
+    ROS_ERROR("No pointCloud yet received");
+    return false;
+  }
   ROS_INFO("Beginning discover_objects_callback");
 
   sensor_msgs::PointCloud2 transformedCloud;
+  sensor_msgs::PointCloud2 floorlessCloud;
 
   ros::Time tfTimestamp = pointCloud->header.stamp;
 
@@ -70,19 +80,22 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
     }
    
   // Wait for transform to become available as necessary
+  if (!pointCloud) {
+    ROS_ERROR("pointCloud was null");
+    return false;
+  }
+
   if (!tf_listener->waitForTransform(pointCloud->header.frame_id, target_frame_id, tfTimestamp,
 				     ros::Duration(3.0)))
     {
-      ROS_ERROR(
-		"Transform from '%s' to '%s' not available within timeout duration", pointCloud->header.frame_id.c_str(), target_frame_id.c_str());
+      ROS_ERROR("Transform from '%s' to '%s' not available within timeout duration", pointCloud->header.frame_id.c_str(), target_frame_id.c_str());
       return false;
     }
   
   // Do the transform
   if (!pcl_ros::transformPointCloud(target_frame_id, *pointCloud, transformedCloud, *tf_listener))
     {
-      ROS_ERROR(
-		"Unable to transform point cloud from frame '%s' to '%s'", pointCloud->header.frame_id.c_str(), target_frame_id.c_str());
+      ROS_ERROR("Unable to transform point cloud from frame '%s' to '%s'", pointCloud->header.frame_id.c_str(), target_frame_id.c_str());
       return false;
     }
   
@@ -102,70 +115,61 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
 
   ROS_INFO("Segmenting image...");
   if (client.call(extract_srv))
-  { //successful
-    if (should_update_enviroment)
+  {
+    // Return clouds
+    int clouds = 0;
+    int i = 0;
+    for (std::vector<sensor_msgs::PointCloud2>::iterator it = extract_srv.response.clouds.begin();
+        it != extract_srv.response.clouds.end(); ++it)
     {
-      //Call environment server
-      ROS_INFO("Updating environment...");
-      ros::ServiceClient env_client = n.serviceClient<rail_object_discovery::UpdateEnvironment>(
-          update_environment_service_name);
+      rail_object_discovery::NamedPointCloud2 namedCloud;
+      namedCloud.cloud = *it; // Copy point cloud
+      std::stringstream ss;
+      ss << "/extract_objects/object_" << i;
+      namedCloud.name = ss.str();
+      object_pubs[i].publish(namedCloud.cloud);
+      ROS_INFO_STREAM("published an object to " << ss.str());
+      res.objects.push_back(namedCloud);
+      if (clouds==0) pcl::copyPointCloud(*it,floorlessCloud);
+      else pcl::concatenatePointCloud(floorlessCloud,*it,floorlessCloud);
+      i++;
+      clouds++;
+    }
 
-      rail_object_discovery::UpdateEnvironment env_srv;
-      env_srv.request.static_environment = transformedCloud;
-      env_srv.request.objects = extract_srv.response.clouds;
+    i = 0;
+    // Return surfaces
+    for (std::vector<rail_pcl_object_segmentation::DiscoveredPlane>::iterator it =
+        extract_srv.response.planes.begin(); it != extract_srv.response.planes.end(); ++it)
+    {
+      rail_object_discovery::NamedPointCloud2 namedCloud;
+      namedCloud.cloud = (*it).planeCloud; // Copy point cloud
+      std::stringstream ss;
+      ss << "/extract_objects/plane_" << i;
+      namedCloud.name = ss.str();
+      plane_pubs[i].publish(namedCloud.cloud);
+      tf::Vector3 plane_normal = tf::Vector3(
+					(double)((*it).a),
+					(double)((*it).b),
+					(double)((*it).c)).normalized();
+      ROS_INFO("published plane with normal (%f,%f,%f) to %s", plane_normal.getX(), plane_normal.getY(), plane_normal.getZ(), ss.str().c_str());
+      res.surfaces.push_back(namedCloud);
+      if (clouds==0) pcl::copyPointCloud((*it).planeCloud,floorlessCloud);
+      else pcl::concatenatePointCloud(floorlessCloud,(*it).planeCloud,floorlessCloud);
+      i++;
+      clouds++;
+    }
 
-      if (env_client.call(env_srv))
-      {
-        ROS_INFO("Service call complete.");
-        // Return named clouds
-        res.objects = env_srv.response.objects;
-        res.surfaces = env_srv.response.surfaces;
-
-        return true;
+    if (!should_update_environment) ROS_DEBUG("Configured not to update environment; update service call skipped.");
+    else {
+      //update environment
+      if (clouds>0) {
+        environment_pub.publish(floorlessCloud);
       }
-      else
-      {
-        ROS_ERROR("Failed to call environment service");
-        return false;
+      else {
+        ROS_INFO("No clouds extracted?");
       }
     }
-    else
-    {
-      // Return clouds
-      int i = 0;
-      for (std::vector<sensor_msgs::PointCloud2>::iterator it = extract_srv.response.clouds.begin();
-          it != extract_srv.response.clouds.end(); ++it)
-      {
-        rail_object_discovery::NamedPointCloud2 namedCloud;
-        namedCloud.cloud = *it; // Copy point cloud
-        std::stringstream ss;
-        ss << "/extract_objects/object_" << i;
-        namedCloud.name = ss.str();
-	object_pubs[i].publish(namedCloud.cloud);
-	ROS_INFO_STREAM("published an object to " << ss.str());
-	i++;
-        res.objects.push_back(namedCloud);
-      }
-
-      i = 0;
-      // Return surfaces
-      for (std::vector<rail_pcl_object_segmentation::DiscoveredPlane>::iterator it =
-          extract_srv.response.planes.begin(); it != extract_srv.response.planes.end(); ++it)
-      {
-        rail_object_discovery::NamedPointCloud2 namedCloud;
-        namedCloud.cloud = (*it).planeCloud; // Copy point cloud
-        std::stringstream ss;
-        ss << "/extract_objects/plane_" << i;
-        namedCloud.name = ss.str();
-	plane_pubs[i].publish(namedCloud.cloud);
-	i++;
-	ROS_INFO_STREAM("published a plane to " << ss.str());
-        res.surfaces.push_back(namedCloud);
-      }
-
-      ROS_DEBUG("Configured not to update environment; update service call skipped.");
-      return true;
-    }
+    return true;
   }
   else
   {
@@ -176,6 +180,8 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
 
 void sensorCallback(const sensor_msgs::PointCloud2::ConstPtr& msg)
 {
+  if (!received_pointCloud) ROS_INFO("First pointCloud received, ready to extract objects");
+  received_pointCloud=true;
   pointCloud = msg;
 }
 
@@ -197,6 +203,7 @@ int main(int argc, char **argv)
         ss << "/extract_objects/plane_" << i;
 	plane_pubs[i]=n.advertise<sensor_msgs::PointCloud2>(ss.str(),1);
   }
+  environment_pub=n.advertise<sensor_msgs::PointCloud2>("/extract_objects/floorless_cloud",1);
 
   // Required parameters
   if (!priv.getParam("sensor_topic", sensor_topic_name))
@@ -210,10 +217,10 @@ int main(int argc, char **argv)
   priv.param<std::string>("service_name", serviceName, "discover_objects");
   priv.param<std::string>("extract_objects_service_name", extract_objects_service_name, "extract_objects");
   ROS_INFO_STREAM("Expecting extract objects service at name '" << extract_objects_service_name << "'");
-  priv.param<bool>("update_environment", should_update_enviroment, true);
-  ROS_INFO_STREAM("Will call update environment service: " << should_update_enviroment);
+  priv.param<bool>("update_environment", should_update_environment, true);
+  ROS_INFO_STREAM("Will call update environment service: " << should_update_environment);
   priv.param<std::string>("update_environment_service_name", update_environment_service_name, "update_environment");
-  if (should_update_enviroment)
+  if (should_update_environment)
     ROS_INFO_STREAM("Expecting update environment service at name '" << update_environment_service_name << "'");
   priv.param<bool>("update_old_cloud_timestamps", update_cloud_timestamp_if_too_old, false);
   ROS_INFO_STREAM("Will update old cloud timestamps: " << update_cloud_timestamp_if_too_old);

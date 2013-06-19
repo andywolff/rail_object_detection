@@ -33,9 +33,7 @@ int main(int argc, char** argv) {
   ros::ServiceServer stop_service = n.advertiseService("ar_camera_calibration_stop", calibration_stop);
 
   transform_gripper2camera.setOrigin(tf::Vector3(0.04,0,0));
-  tf::Quaternion quat;
-  quat.setRPY(0,1.57,0);
-  transform_gripper2camera.setRotation(quat);
+  transform_gripper2camera.setRotation(tf::createQuaternionFromRPY(0,1.57,0));
 
   ros::Rate rate(10.0);
   while (n.ok()) {

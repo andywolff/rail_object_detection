@@ -3,10 +3,10 @@
 	<arg name="update_state_cloud_timestamps" default="true" />
 	
 	<!-- Whether the planning_environment should be updated with discovered objects or not -->
-	<arg name="update_environment" default="false" />
+	<arg name="update_environment" default="true" />
 
 	<!-- Arguments for sensor -->
-	<arg name="sensor_topic" default="openni/depth_registered/points"/>
+	<arg name="sensor_topic" default="xtion/depth_registered/points"/>
 	<arg name="target_frame_id" default="base_link"/>
 	
 	<!-- Argument for dynamic inputs to planning_environment -->
@@ -36,6 +36,7 @@
 -->
 	<!-- Run object discovery main service -->
 	<node pkg="rail_object_discovery"
+launch-prefix="gdb -ex run --args"
 	      type="discover_objects_server" 
 	      name="rail_object_discovery" 
               output="screen">

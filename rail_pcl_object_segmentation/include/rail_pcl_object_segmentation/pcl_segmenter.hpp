@@ -176,7 +176,7 @@ template<typename PointT>
  * inliers is discovered.
  * 
  * By default, RANSAC is performed with 300 iterations and a distance
- * tolerance of 0.018 meters. Planes with more than 5000 inliers
+ * tolerance of 0.018 meters. Planes with more than 1000 inliers
  * are extracted.
  * 
  * \param [in] inputCloud The cloud to extract planes from.
@@ -259,7 +259,7 @@ template<typename PointT>
  * This function performs PCL Euclidian Clustering as in the
  * tutorial available here: http://www.pointclouds.org/documentation/tutorials/cluster_extraction.php#cluster-extraction
  * 
- * This function defaults to a point tolerance of 10 cm, a minimum
+ * This function defaults to a point tolerance of 4 cm, a minimum
  * size of 25 points in an object, and a maximum of 10,000 points
  * in an object.
  * 
@@ -270,7 +270,7 @@ template<typename PointT>
   void ExtractObjectClouds(typename pcl::PointCloud<PointT>::Ptr cloud,
                            std::vector<typename pcl::PointCloud<PointT>::Ptr>& objectClouds)
   {
-    ExtractObjectClouds<PointT>(cloud, 0.1, 25, 10000, objectClouds);
+    ExtractObjectClouds<PointT>(cloud, 0.04, 20, 10000, objectClouds);
   }
 }
 

@@ -9,6 +9,24 @@ sensor_msgs/PointCloud2 static_environment
 # they will be filtered out as necessary.
 sensor_msgs/PointCloud2[] objects
 
+# note about optional parameters: if the size of the optional array does not match the size of the objects array, it will be ignored (for now)
+
+# (Optional) The name of each object
+# If not given, it will name them object_0, object_1... etc in the order they appear in objects[]
+std_msgs/String[] names
+
+# (Optional) The center of each object
+# If not given, it will calculate it from the cloud
+geometry_msgs/Point[] centers
+
+# (Optional) The color of each object
+# If not given, it will calculate the average color of the cloud
+std_msgs/ColorRGBA[] colors
+
+# (Optional) The radius of the object if it were a sphere
+# If not given, it will calculate the largest distance from the center
+std_msgs/Float64[] radii
+
 # Point clouds of surfaces.
 # Points within these clouds may exist in the static_environment cloud;
 # they will be filtered out as necessary.

@@ -27,6 +27,7 @@
   <depend package="rail_pcl_object_segmentation" /> <!-- Defines TBD, provides TBD service -->
   <depend package="geometry_msgs"/> <!--Temporaraliy needed for object_selection-->
   <depend package="visualization_msgs"/> <!--For text markers-->
+  <depend package="object_manipulation_msgs"/>
   
 
 </package>

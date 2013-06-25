@@ -14,7 +14,7 @@
  */
 
 #include <ros/ros.h>
-#include <arm_navigation_msgs/CollisionObject.h>
+
 #include <object_manipulation_msgs/FindClusterBoundingBox2.h>
 
 #include <pcl/point_types.h>
@@ -25,8 +25,69 @@
 #include "rail_object_discovery/NamedPointCloud2.h"
 #include "rail_object_discovery/UpdateEnvironment.h"
 
-ros::Publisher collision_object_publisher;
+#include "visualization_msgs/Marker.h"
+#include "visualization_msgs/MarkerArray.h"
+
+#include "moveit_msgs/CollisionObject.h"
+
+#define MAX_OBJECTS 20
+#define MAX_PLANES 10
+ros::Publisher object_pubs[MAX_OBJECTS];
+ros::Publisher plane_pubs[MAX_PLANES];
+ros::Publisher environment_pub;
+ros::Publisher names_pub;
+ros::Publisher collision_object_pub;
+
 ros::ServiceClient bounding_box_finder;
+
+
+//clears all published clouds, names, and objects
+void clear() {
+  sensor_msgs::PointCloud2 emptyCloud;
+  emptyCloud.header.frame_id="/odom";  //TODO: get this from somewhere
+  visualization_msgs::MarkerArray markers;
+  int i;
+  for (i=0; i<MAX_OBJECTS; i++) {
+
+    //publish the empty cloud to clear the object
+    object_pubs[i].publish(emptyCloud);
+
+    //add an empty marker to clear the name
+    visualization_msgs::Marker marker;
+    marker.header.frame_id=emptyCloud.header.frame_id;
+    marker.header.stamp = ros::Time();
+    marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    marker.ns="extract_objects";
+    marker.id=i;
+    marker.action = visualization_msgs::Marker::DELETE;
+    markers.markers.push_back(marker);
+
+    /*//remove all potential collisionObjects
+    moveit_msgs::CollisionObject collision_object;
+    collision_object.header.frame_id=emptyCloud.header.frame_id;
+    std::stringstream ss;
+    ss << "object_" << i;
+    collision_object.id=ss.str();
+    collision_object.operation=collision_object.REMOVE;
+    //publish the collision_object
+    collision_object_pub.publish(collision_object);*/
+  }
+  //publish the empty markers to clear the names
+  names_pub.publish(markers);
+
+  // Clear all collision objects
+//  ROS_INFO("Clearing all existing objects in planning environment.");
+  moveit_msgs::CollisionObject clearAllObjectsMsg;
+  clearAllObjectsMsg.operation = clearAllObjectsMsg.REMOVE;
+  clearAllObjectsMsg.id = "all";
+  clearAllObjectsMsg.header.stamp = ros::Time::now();
+  collision_object_pub.publish(clearAllObjectsMsg);
+
+  for (i=0; i<MAX_PLANES; i++) {
+    //publish the empty cloud to clear the plane
+    plane_pubs[i].publish(emptyCloud);
+  }
+}
 
 bool add_cloud_bounding_box_to_collision_environment(const rail_object_discovery::NamedPointCloud2& namedCloud)
 {
@@ -50,50 +111,32 @@ bool add_cloud_bounding_box_to_collision_environment(const rail_object_discovery
 
   ROS_INFO(" Bounding box determined, publishing object.");
 
+
+  // Add the object as a collisionObject to the moveIt planning scene
   // Create add object message
-  arm_navigation_msgs::CollisionObject objectMsg;
+  moveit_msgs::CollisionObject objectMsg;
   objectMsg.id = namedCloud.name;
-  objectMsg.operation.operation = arm_navigation_msgs::CollisionObjectOperation::ADD;
+  objectMsg.operation = objectMsg.ADD;
 
   objectMsg.header.stamp = ros::Time::now();
   objectMsg.header.frame_id = boundingBoxRequest.response.pose.header.frame_id;
 
-  // If the ratio of of the bounding box's dimensions are below the threshold, consider it a cylinder
-  double objectSizeRatio = boundingBoxRequest.response.box_dims.x / boundingBoxRequest.response.box_dims.y;
-  ROS_INFO_STREAM("Object size ratio: " << objectSizeRatio);
+  // Note that x >= y by the way the bounding box is extracted: "x-axis is aligned with the direction of the largest point cloud variance"
 
-  arm_navigation_msgs::Shape object;
-  if(namedCloud.name.find("object_") != std::string::npos
-     && objectSizeRatio < 1.3) {
-    // Set the collision object shape to a cylinder
-    ROS_INFO("Interpreting object as cylinder");
-    object.type = arm_navigation_msgs::Shape::CYLINDER;
-    object.dimensions.resize(2);
-    object.dimensions[0] = 0.25 * (boundingBoxRequest.response.box_dims.x + boundingBoxRequest.response.box_dims.y);
-    object.dimensions[1] = boundingBoxRequest.response.box_dims.z;
-  }
-  else {
-    // Set the collision object shape to a box
-    object.type = arm_navigation_msgs::Shape::BOX;
-    object.dimensions.resize(3);
-    object.dimensions[0] = boundingBoxRequest.response.box_dims.x;
-    object.dimensions[1] = boundingBoxRequest.response.box_dims.y;
-    
-    // If it is a surface, reduce the bounding box's height
-    if(namedCloud.name.find("surface_") != std::string::npos 
-       && boundingBoxRequest.response.box_dims.x > boundingBoxRequest.response.box_dims.z
-       && boundingBoxRequest.response.box_dims.y > boundingBoxRequest.response.box_dims.z)
-      object.dimensions[2] = 0.005;
-    else
-      object.dimensions[2] = boundingBoxRequest.response.box_dims.z;
-  }
+  shape_msgs::SolidPrimitive primitive;
+  // Set the collision object shape to a box //TODO: consider cylinders or spheres
+  primitive.type = primitive.BOX;
+  primitive.dimensions.resize(3);
+  primitive.dimensions[primitive.BOX_X] = boundingBoxRequest.response.box_dims.x;
+  primitive.dimensions[primitive.BOX_Y] = boundingBoxRequest.response.box_dims.y;
+  primitive.dimensions[primitive.BOX_Z] = boundingBoxRequest.response.box_dims.z;
   
   // Add the shape to the message
-  objectMsg.shapes.push_back(object);
-  objectMsg.poses.push_back(boundingBoxRequest.response.pose.pose);
+  objectMsg.primitives.push_back(primitive);
+  objectMsg.primitive_poses.push_back(boundingBoxRequest.response.pose.pose);
 
   // Publish collision object
-  collision_object_publisher.publish(objectMsg);
+  collision_object_pub.publish(objectMsg);
 
   return true;
 }
@@ -104,6 +147,7 @@ bool add_cloud_bounding_box_to_collision_environment(const rail_object_discovery
 bool update_environment_callback(rail_object_discovery::UpdateEnvironment::Request& request,
                                  rail_object_discovery::UpdateEnvironment::Response& response)
 {
+  ROS_INFO("Updating Environment");
   // TODO: Filter objects out of original point cloud and publish result for static collision avoidance.
   // The intent is that the environment minus all of the discovered objects would be processed by
   // a package like collider (http://www.ros.org/wiki/collider) such that a static collision message
@@ -111,15 +155,21 @@ bool update_environment_callback(rail_object_discovery::UpdateEnvironment::Reque
   // This would allow a robot's arm to dodge static obstacles. Collider seemed to segfault frequently for
   // me; perhaps another package would work better.
 
-  // Clear all collision objects
-  ROS_INFO("Clearing all existing objects in planning environment.");
-  arm_navigation_msgs::CollisionObject clearAllObjectsMsg;
-  clearAllObjectsMsg.operation.operation = arm_navigation_msgs::CollisionObjectOperation::REMOVE;
-  clearAllObjectsMsg.id = "all";
-  clearAllObjectsMsg.header.stamp = ros::Time::now();
-  clearAllObjectsMsg.header.frame_id = request.static_environment.header.frame_id;
-  collision_object_publisher.publish(clearAllObjectsMsg);
+  clear();
   
+  int combined_clouds = 0;
+  sensor_msgs::PointCloud2 floorlessCloud; //a cloud generated by combining objects and non-horizontal planes
+  //TODO: ^ subtract floors from the whole cloud instead so limbo pixels don't disappear
+
+  visualization_msgs::MarkerArray markers;
+
+  if (request.objects.size() > request.centers.size() || request.objects.size() > request.colors.size()
+	|| request.objects.size() > request.radii.size())
+  {
+    ROS_ERROR("Invalid update_environment_service request. Currently you must fully specify center, color, and radius for each cloud. Later this will be optional");
+    return false;
+  }
+
   // Name each object and add it to the planning environment
   for (std::vector<sensor_msgs::PointCloud2>::size_type i = 0; i < request.objects.size(); i++)
   {
@@ -130,30 +180,63 @@ bool update_environment_callback(rail_object_discovery::UpdateEnvironment::Reque
     rail_object_discovery::NamedPointCloud2 namedCloud;
     namedCloud.cloud = request.objects.at(i);
     namedCloud.name = ss.str();
+    //publish the object cloud to its respective topic
+    object_pubs[i].publish(namedCloud.cloud);
+    ROS_INFO_STREAM("published an object to /extract_objects/" << ss.str());
     response.objects.push_back(namedCloud);
+
+    //add the object to the combined cloud
+    if (combined_clouds==0) pcl::copyPointCloud(request.objects.at(i),floorlessCloud);
+    else pcl::concatenatePointCloud(floorlessCloud,request.objects.at(i),floorlessCloud);
+
+    //get the object's center
+    geometry_msgs::Point center = request.centers.at(i);
+    //generate a text marker at the center and color
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = namedCloud.cloud.header.frame_id;
+    marker.header.stamp = ros::Time();
+    marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    marker.ns="extract_objects";
+    marker.id=i;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = center.x;
+    marker.pose.position.y = center.y;
+    marker.pose.position.z = center.z+request.radii.at(i).data;
+    marker.scale.z = 0.1;
+    std_msgs::ColorRGBA color = request.colors.at(i);
+    marker.color.a = 1.0;
+    marker.color.r = 255-color.r;
+    marker.color.g = 255-color.g;
+    marker.color.b = 255-color.b;
+    marker.text=ss.str();
+    //add the text marker to the marker array
+    markers.markers.push_back(marker);
 
     ROS_INFO_STREAM("Adding '" << ss.str() << "' to planning environment:");
 
-    if (!add_cloud_bounding_box_to_collision_environment(namedCloud))
-      return false;
+    /*if (!*/add_cloud_bounding_box_to_collision_environment(namedCloud);//)
+    //  return false;
   }
+  names_pub.publish(markers);
   
   // Name each surface and add it to the planning environment
   for (std::vector<sensor_msgs::PointCloud2>::size_type i = 0; i < request.surfaces.size(); i++)
   {
     std::stringstream ss;
-    ss << "surface_" << i;
+    ss << "/extract_objects/plane_" << i;
 
     // Return named surfaces
     rail_object_discovery::NamedPointCloud2 namedCloud;
     namedCloud.cloud = request.surfaces.at(i);
     namedCloud.name = ss.str();
     response.surfaces.push_back(namedCloud);
+    plane_pubs[i].publish(namedCloud.cloud);
 
     ROS_INFO_STREAM("Adding '" << ss.str() << "' to planning environment:");
 
-    if (!add_cloud_bounding_box_to_collision_environment(namedCloud))
-      return false;
+      //don't add planes to the planning scene
+    //if (!add_cloud_bounding_box_to_collision_environment(namedCloud))
+    //  return false;
   }
 
   ROS_INFO("Service call complete.");
@@ -181,7 +264,26 @@ int main(int argc, char** argv)
   ROS_INFO("Waiting for existence of bounding box service of name '%s'...", boundingBoxServiceName.c_str());
   bounding_box_finder.waitForExistence();
 
-  collision_object_publisher = n.advertise<arm_navigation_msgs::CollisionObject>(collisionObjectTopicName, 1000);
+  //generate a publisher for each object and plane
+  int i;
+  for (i=0; i<MAX_OBJECTS; i++) {
+	std::stringstream ss;
+        ss << "/extract_objects/object_" << i;
+	object_pubs[i]=n.advertise<sensor_msgs::PointCloud2>(ss.str(),1);
+  }
+  for (i=0; i<MAX_PLANES; i++) {
+	std::stringstream ss;
+        ss << "/extract_objects/plane_" << i;
+	plane_pubs[i]=n.advertise<sensor_msgs::PointCloud2>(ss.str(),1);
+  }
+  //generate a publisher for the floorless cloud
+  environment_pub=n.advertise<sensor_msgs::PointCloud2>("/extract_objects/floorless_cloud",1);
+
+  //generate a publisher for the name text markers
+  names_pub = n.advertise<visualization_msgs::MarkerArray>("/extract_objects/names",10);
+
+  //generate a publisher for moveIt collision objects
+  collision_object_pub=n.advertise<moveit_msgs::CollisionObject>("/collision_object",10);
   ROS_INFO("Ready to publish collision objects at name '%s'", collisionObjectTopicName.c_str());
 
   ros::ServiceServer service = n.advertiseService(serviceName, update_environment_callback);

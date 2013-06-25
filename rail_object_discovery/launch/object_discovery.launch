@@ -7,7 +7,7 @@
 
 	<!-- Arguments for sensor -->
 	<arg name="sensor_topic" default="xtion/depth_registered/points"/>
-	<arg name="target_frame_id" default="base_link"/>
+	<arg name="target_frame_id" default="odom"/>
 	
 	<!-- Argument for dynamic inputs to planning_environment -->
 <!--	<arg name="collision_object_topic" /> -->
@@ -25,15 +25,15 @@
                   output="screen" />
 		  
 	<!-- Run environment update service -->
-<!--	<node pkg="rail_object_discovery"
+	<node pkg="rail_object_discovery"
 		  type="update_environment_server"
 		  name="update_environment_server"
                   output="screen"
 		  if="$(arg update_environment)">
 		<param name="~output/filtered_env_cloud_topic_name" value="static_environment_filtered" />
-		<param name="~output/collision_object_topic_name" value="$(arg collision_object_topic)" />
-	</node>
--->
+<!--		<param name="~output/collision_object_topic_name" value="$(arg collision_object_topic)" />
+-->	</node>
+
 <!-- launch-prefix="gdb -ex run -///-args" -->
 	<!-- Run object discovery main service -->
 	<node pkg="rail_object_discovery"

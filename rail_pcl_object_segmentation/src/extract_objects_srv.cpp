@@ -16,7 +16,15 @@
 #include "rail_pcl_object_segmentation/pcl_segmenter.hpp"
 #include "geometry_msgs/Twist.h"
 
-struct object_filter : public std::unary_function<pcl::PointCloud<pcl::PointXYZRGB>::Ptr, bool>
+class potential_object
+{
+  public:
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud;
+  pcl::PointXYZRGB center;
+  double radius;
+};
+
+struct object_filter : public std::unary_function<potential_object, bool>
 {
   double min_distance;
   double max_distance;
@@ -24,16 +32,14 @@ struct object_filter : public std::unary_function<pcl::PointCloud<pcl::PointXYZR
   double max_radius;
 
   // Filter function
-  bool operator()(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud) const
+  bool operator()(const potential_object object) const
   {
-    pcl::PointXYZRGB center = rail::AveragePointCloudToPoint<pcl::PointXYZRGB>(cloud);
-    double radius = rail::ComputePointCloudBoundingRadiusFromPoint<pcl::PointXYZRGB>(cloud, center);
-    ROS_DEBUG("Filter visiting point cloud:");
+    ROS_DEBUG_STREAM("Filter visiting object at (" << object.center.x << ", " << object.center.y << ", " << object.center.z << ")");
 
     if (min_distance >= 0 || max_distance >= 0)
     {
       // Compute center point distance from 0,0
-      double distance = sqrt(pow(center.x, 2.0) + pow(center.y, 2.0) + pow(center.z, 2.0));
+      double distance = sqrt(pow(object.center.x, 2.0) + pow(object.center.y, 2.0) + pow(object.center.z, 2.0));
       ROS_DEBUG_STREAM(" Point cloud distance from origin (m): " << distance);
 
       if (min_distance >= 0 && distance < min_distance)
@@ -49,13 +55,13 @@ struct object_filter : public std::unary_function<pcl::PointCloud<pcl::PointXYZR
       }
     }
 
-    ROS_DEBUG_STREAM(" Point cloud spherical radius (m): " << radius);
-    if (min_radius >= 0 && radius < min_radius)
+    ROS_DEBUG_STREAM(" Point cloud spherical radius (m): " << object.radius);
+    if (min_radius >= 0 && object.radius < min_radius)
     {
       ROS_DEBUG("  Point cloud radius too small; discarding object");
       return false;
     }
-    if (max_radius >= 0 && radius > max_radius)
+    if (max_radius >= 0 && object.radius > max_radius)
     {
       ROS_DEBUG("  Point cloud radius too large; discarding object");
       return false;
@@ -75,7 +81,7 @@ bool extract(rail_pcl_object_segmentation::ExtractObjects::Request &req,
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr pclCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
   pcl::fromROSMsg(req.cloud, *pclCloud);
 
-  //extract point clouds
+  //prepare to extract point clouds
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr processed_cloud = pcl::PointCloud<pcl::PointXYZRGB>::Ptr(
       new pcl::PointCloud<pcl::PointXYZRGB>());
 
@@ -96,8 +102,19 @@ bool extract(rail_pcl_object_segmentation::ExtractObjects::Request &req,
     res.planes.push_back(*(*it));
   }
 
-  std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> objects;
-  rail::ExtractObjectClouds<pcl::PointXYZRGB>(processed_cloud, objects);
+  // Extract Objects
+  std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> object_clouds;
+  rail::ExtractObjectClouds<pcl::PointXYZRGB>(processed_cloud, object_clouds);
+  // fill in extra object data
+  std::vector<potential_object> objects;
+  for (unsigned int i=0; i<object_clouds.size(); i++) {
+    potential_object object;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud = object_clouds.at(i);
+    object.cloud = cloud;
+    object.center = rail::AveragePointCloud(cloud);
+    object.radius = rail::ComputePointCloudBoundingRadiusFromPoint<pcl::PointXYZRGB>(cloud, object.center);
+    objects.push_back(object);
+  }
 
   // Filter point clouds
   struct object_filter correct_params;
@@ -115,34 +132,31 @@ bool extract(rail_pcl_object_segmentation::ExtractObjects::Request &req,
 
   objects.erase(std::remove_if(objects.begin(), objects.end(), std::not1(correct_params)), objects.end());
 
-  //convert back to point clouds
-  sensor_msgs::PointCloud2 object;
-  geometry_msgs::Twist center;
-  
+  //convert to DiscoveredObject messages  
   for (int i = 0; i < (int)objects.size(); i++)
   {
-    //get the current pointcloud
-    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr tempCloud = objects.at(i);
-    //get it as a ROS message
-    pcl::toROSMsg(*tempCloud, object);
-    //find the center of the current pointcloud
-    pcl::PointXYZRGB pcl_center = rail::AveragePointCloud(tempCloud);
-    //convert the center to a ROS Twist message where linear is position and angular is color
-    center.linear.x=pcl_center.x;
-    center.linear.y=pcl_center.y;
-    center.linear.z=pcl_center.z;
-    center.angular.x=(double)pcl_center.r;
-    center.angular.y=(double)pcl_center.g;
-    center.angular.z=(double)pcl_center.b;
-    ROS_INFO_STREAM(" CenterXYZRGB: " << pcl_center.x << "," << pcl_center.y << "," << pcl_center.z << "," << (double)pcl_center.r << "," << (double)pcl_center.g << "," << (double)pcl_center.b );
-    //find the radius of the current pointcloud
-    double radius = rail::ComputePointCloudBoundingRadiusFromPoint<pcl::PointXYZRGB>(tempCloud, pcl_center);
-    std_msgs::Float64 r;
-    r.data=radius;
-    //put the cloud and center into the service response
-    res.clouds.push_back(object);
-    res.centers.push_back(center);
-    res.radii.push_back(r);
+    rail_pcl_object_segmentation::DiscoveredObject discovered_object;
+    //get the current potential_object
+    potential_object object;
+    object=objects.at(i);
+
+    //convert the point cloud
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr tempCloud = object.cloud;
+    pcl::toROSMsg(*tempCloud, discovered_object.objectCloud);
+    //set the center
+    discovered_object.center.x=object.center.x;
+    discovered_object.center.y=object.center.y;
+    discovered_object.center.z=object.center.z;
+    //set the color
+    discovered_object.color.r=(double)object.center.r;
+    discovered_object.color.g=(double)object.center.g;
+    discovered_object.color.b=(double)object.center.b;
+    discovered_object.color.a=1.0;
+    ROS_INFO_STREAM(" CenterXYZRGB: " << object.center.x << "," << object.center.y << "," << object.center.z << "," << (double)object.center.r << "," << (double)object.center.g << "," << (double)object.center.b );
+    //set the radius
+    discovered_object.radius.data = object.radius;
+    //put the discovered object into the response
+    res.objects.push_back(discovered_object);
   }
 
   ROS_INFO_STREAM("Returning " << objects.size() << " objects");

@@ -17,6 +17,28 @@
 
 namespace rail
 {
+pcl::PointXYZRGB AveragePointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud) {
+  unsigned int total_points = cloud->size();
+  double x=0,y=0,z=0,r=0,g=0,b=0;
+  for(pcl::PointCloud<pcl::PointXYZRGB>::const_iterator it = cloud->begin(); it != cloud->end(); ++it) {
+     pcl::PointXYZRGB p = *it;
+     x+=p.x;
+     y+=p.y;
+     z+=p.z;
+     r+=p.r;
+     g+=p.g;
+     b+=p.b;
+  }
+  pcl::PointXYZRGB p;
+  p.x=x/total_points;
+  p.y=y/total_points;
+  p.z=z/total_points;
+  p.r=r/total_points;
+  p.g=g/total_points;
+  p.b=b/total_points;
+  return p;
+}
+
 /*!
  * \brief Averages together the points in a point cloud and returns the resulting point.
  * 

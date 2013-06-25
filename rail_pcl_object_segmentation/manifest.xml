@@ -17,7 +17,8 @@
   <depend package="pcl_ros"/>
 	<depend package="actionlib"/>
 	<depend package="actionlib_msgs"/>
-  
+  <depend package="geometry_msgs"/>
+
   <!-- System dependencies -->
   <rosdep name="gtest" />
   

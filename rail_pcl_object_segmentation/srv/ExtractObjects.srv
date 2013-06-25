@@ -13,5 +13,11 @@ float64 plane_slope_tolerance # Ignored if <= 0
 #the array of pointclouds the segmentation finds
 sensor_msgs/PointCloud2[] clouds
 
+#the center and average color of each pointcloud
+geometry_msgs/Twist[] centers
+
+#the spherical radius of each pointCloud
+std_msgs/Float64[] radii
+
 # The array of planes the segmentation finds
 rail_pcl_object_segmentation/DiscoveredPlane[] planes

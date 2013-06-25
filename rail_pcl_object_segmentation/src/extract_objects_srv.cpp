@@ -14,6 +14,7 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 #include "rail_pcl_object_segmentation/pcl_segmenter.hpp"
+#include "geometry_msgs/Twist.h"
 
 struct object_filter : public std::unary_function<pcl::PointCloud<pcl::PointXYZRGB>::Ptr, bool>
 {
@@ -116,12 +117,32 @@ bool extract(rail_pcl_object_segmentation::ExtractObjects::Request &req,
 
   //convert back to point clouds
   sensor_msgs::PointCloud2 object;
-
+  geometry_msgs::Twist center;
+  
   for (int i = 0; i < (int)objects.size(); i++)
   {
-    const pcl::PointCloud<pcl::PointXYZRGB> tempCloud = *objects.at(i);
-    pcl::toROSMsg(tempCloud, object);
+    //get the current pointcloud
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr tempCloud = objects.at(i);
+    //get it as a ROS message
+    pcl::toROSMsg(*tempCloud, object);
+    //find the center of the current pointcloud
+    pcl::PointXYZRGB pcl_center = rail::AveragePointCloud(tempCloud);
+    //convert the center to a ROS Twist message where linear is position and angular is color
+    center.linear.x=pcl_center.x;
+    center.linear.y=pcl_center.y;
+    center.linear.z=pcl_center.z;
+    center.angular.x=(double)pcl_center.r;
+    center.angular.y=(double)pcl_center.g;
+    center.angular.z=(double)pcl_center.b;
+    ROS_INFO_STREAM(" CenterXYZRGB: " << pcl_center.x << "," << pcl_center.y << "," << pcl_center.z << "," << (double)pcl_center.r << "," << (double)pcl_center.g << "," << (double)pcl_center.b );
+    //find the radius of the current pointcloud
+    double radius = rail::ComputePointCloudBoundingRadiusFromPoint<pcl::PointXYZRGB>(tempCloud, pcl_center);
+    std_msgs::Float64 r;
+    r.data=radius;
+    //put the cloud and center into the service response
     res.clouds.push_back(object);
+    res.centers.push_back(center);
+    res.radii.push_back(r);
   }
 
   ROS_INFO_STREAM("Returning " << objects.size() << " objects");

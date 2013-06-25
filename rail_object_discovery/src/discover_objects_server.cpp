@@ -32,6 +32,11 @@
 
 #include "tf/transform_datatypes.h"
 
+#include "visualization_msgs/Marker.h"
+#include "visualization_msgs/MarkerArray.h"
+
+#include "moveit_msgs/CollisionObject.h"
+
 #define TF_BUFFER_DURATION_SECS 10
 
 #define MAX_OBJECTS 10
@@ -39,6 +44,8 @@
 ros::Publisher object_pubs[MAX_OBJECTS];
 ros::Publisher plane_pubs[MAX_PLANES];
 ros::Publisher environment_pub;
+ros::Publisher names_pub;
+ros::Publisher collision_object_pub;
 
 std::string sensor_topic_name, target_frame_id, extract_objects_service_name, update_environment_service_name;
 bool update_cloud_timestamp_if_too_old, should_update_environment;
@@ -48,6 +55,46 @@ tf::TransformListener* tf_listener;
 sensor_msgs::PointCloud2::ConstPtr pointCloud;
 
 bool received_pointCloud=false;
+
+//clears all published clouds, names, and objects
+void clear() {
+  sensor_msgs::PointCloud2 emptyCloud;
+  emptyCloud.header.frame_id="/odom";
+  visualization_msgs::MarkerArray markers;
+  int i;
+  for (i=0; i<MAX_OBJECTS; i++) {
+
+    //publish the empty cloud to clear the object
+    object_pubs[i].publish(emptyCloud);
+
+    //add an empty marker to clear the name
+    visualization_msgs::Marker marker;
+    marker.header.frame_id=emptyCloud.header.frame_id;
+    marker.header.stamp = ros::Time();
+    marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    marker.ns="extract_objects";
+    marker.id=i;
+    marker.action = visualization_msgs::Marker::DELETE;
+    markers.markers.push_back(marker);
+
+    //remove all potential collisionObjects
+    moveit_msgs::CollisionObject collision_object;
+    collision_object.header.frame_id=emptyCloud.header.frame_id;
+    std::stringstream ss;
+    ss << "object_" << i;
+    collision_object.id=ss.str();
+    collision_object.operation=collision_object.REMOVE;
+    //publish the collision_object
+    collision_object_pub.publish(collision_object);
+  }
+  //publish the empty markers to clear the names
+  names_pub.publish(markers);
+
+  for (i=0; i<MAX_PLANES; i++) {
+    //publish the empty cloud to clear the plane
+    plane_pubs[i].publish(emptyCloud);
+  }
+}
 
 bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &req,
                                rail_object_discovery::DiscoverObjects::Response &res)
@@ -98,7 +145,10 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
       ROS_ERROR("Unable to transform point cloud from frame '%s' to '%s'", pointCloud->header.frame_id.c_str(), target_frame_id.c_str());
       return false;
     }
-  
+
+
+  //clear anything previously extracted
+  clear();  
   
   //call extract objects server
   ros::NodeHandle n;
@@ -116,28 +166,82 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
   ROS_INFO("Segmenting image...");
   if (client.call(extract_srv))
   {
-    // Return clouds
-    int clouds = 0;
+    int combined_clouds = 0;
     int i = 0;
+
+    // handle extracted objects
+    visualization_msgs::MarkerArray markers;
     for (std::vector<sensor_msgs::PointCloud2>::iterator it = extract_srv.response.clouds.begin();
         it != extract_srv.response.clouds.end(); ++it)
     {
+      //get the current object's cloud
       rail_object_discovery::NamedPointCloud2 namedCloud;
-      namedCloud.cloud = *it; // Copy point cloud
+      namedCloud.cloud = *it;
+
+      //generate a name
       std::stringstream ss;
-      ss << "/extract_objects/object_" << i;
+      ss << "object_" << i;
       namedCloud.name = ss.str();
+      //publish the object cloud to its respective topic
       object_pubs[i].publish(namedCloud.cloud);
-      ROS_INFO_STREAM("published an object to " << ss.str());
+      ROS_INFO_STREAM("published an object to /extract_objects/" << ss.str());
+      //put the named object into the service response
       res.objects.push_back(namedCloud);
-      if (clouds==0) pcl::copyPointCloud(*it,floorlessCloud);
+
+      //add the object to the combined cloud
+      if (combined_clouds==0) pcl::copyPointCloud(*it,floorlessCloud);
       else pcl::concatenatePointCloud(floorlessCloud,*it,floorlessCloud);
+
+      //get the object's center
+      geometry_msgs::Twist center = extract_srv.response.centers.at(i);
+      //generate a text marker at the center and color
+      visualization_msgs::Marker marker;
+      marker.header.frame_id = namedCloud.cloud.header.frame_id;
+      marker.header.stamp = ros::Time();
+      marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+      marker.ns="extract_objects";
+      marker.id=i;
+      marker.action = visualization_msgs::Marker::ADD;
+      marker.pose.position.x = center.linear.x;
+      marker.pose.position.y = center.linear.y;
+      marker.pose.position.z = center.linear.z+0.1;
+      marker.scale.z = 0.1;
+      marker.color.a = 1.0;
+      marker.color.r = 255-center.angular.x;
+      marker.color.g = 255-center.angular.y;
+      marker.color.b = 255-center.angular.z;
+      marker.text=ss.str();
+      //add the text marker to the marker array
+      markers.markers.push_back(marker);
+
+      //generate a CollisionObject for MoveIt
+      moveit_msgs::CollisionObject collision_object;
+      collision_object.header.frame_id=namedCloud.cloud.header.frame_id;
+      collision_object.id = ss.str();
+      geometry_msgs::Pose pose;
+      pose.position.x=center.linear.x;
+      pose.position.y=center.linear.y;
+      pose.position.z=center.linear.z;
+      pose.orientation.w = 1.0;
+      //get the radius
+      double radius = extract_srv.response.radii.at(i).data;
+      //define the object as a sphere (for now)
+      shape_msgs::SolidPrimitive primitive;
+      primitive.type = primitive.SPHERE;  
+      primitive.dimensions.resize(1);
+      primitive.dimensions[primitive.SPHERE_RADIUS] = radius;
+      collision_object.primitives.push_back(primitive);
+      collision_object.primitive_poses.push_back(pose);
+      collision_object.operation=collision_object.ADD;
+      //publish the collision_object
+      collision_object_pub.publish(collision_object);
       i++;
-      clouds++;
+      combined_clouds++;
     }
+    names_pub.publish(markers);
 
     i = 0;
-    // Return surfaces
+    // handle extracted surfaces
     for (std::vector<rail_pcl_object_segmentation::DiscoveredPlane>::iterator it =
         extract_srv.response.planes.begin(); it != extract_srv.response.planes.end(); ++it)
     {
@@ -153,16 +257,21 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
 					(double)((*it).c)).normalized();
       ROS_INFO("published plane with normal (%f,%f,%f) to %s", plane_normal.getX(), plane_normal.getY(), plane_normal.getZ(), ss.str().c_str());
       res.surfaces.push_back(namedCloud);
-      if (clouds==0) pcl::copyPointCloud((*it).planeCloud,floorlessCloud);
-      else pcl::concatenatePointCloud(floorlessCloud,(*it).planeCloud,floorlessCloud);
+      //consider replacing 0.9 with extract_srv.request.plane_slope_tolerance or something
+      if (plane_normal.getZ()<0.9)
+      {
+        //combine the plane to the floorless cloud if it is not horizontal
+        if (combined_clouds==0) pcl::copyPointCloud((*it).planeCloud,floorlessCloud);
+        else pcl::concatenatePointCloud(floorlessCloud,(*it).planeCloud,floorlessCloud);
+        combined_clouds++;
+      }
       i++;
-      clouds++;
     }
 
     if (!should_update_environment) ROS_DEBUG("Configured not to update environment; update service call skipped.");
     else {
       //update environment
-      if (clouds>0) {
+      if (combined_clouds>0) {
         environment_pub.publish(floorlessCloud);
       }
       else {
@@ -181,6 +290,7 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
 void sensorCallback(const sensor_msgs::PointCloud2::ConstPtr& msg)
 {
   if (!received_pointCloud) ROS_INFO("First pointCloud received, ready to extract objects");
+  else ROS_DEBUG("Received pointCloud");
   received_pointCloud=true;
   pointCloud = msg;
 }
@@ -203,7 +313,14 @@ int main(int argc, char **argv)
         ss << "/extract_objects/plane_" << i;
 	plane_pubs[i]=n.advertise<sensor_msgs::PointCloud2>(ss.str(),1);
   }
+  //generate a publisher for the floorless cloud
   environment_pub=n.advertise<sensor_msgs::PointCloud2>("/extract_objects/floorless_cloud",1);
+
+  //generate a publisher for the name text markers
+  names_pub = n.advertise<visualization_msgs::MarkerArray>("/extract_objects/names",10);
+
+  //generate a publisher for moveIt collision objects
+  collision_object_pub=n.advertise<moveit_msgs::CollisionObject>("/collision_object",10);
 
   // Required parameters
   if (!priv.getParam("sensor_topic", sensor_topic_name))

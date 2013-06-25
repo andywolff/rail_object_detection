@@ -34,9 +34,10 @@
 		<param name="~output/collision_object_topic_name" value="$(arg collision_object_topic)" />
 	</node>
 -->
+<!-- launch-prefix="gdb -ex run -///-args" -->
 	<!-- Run object discovery main service -->
 	<node pkg="rail_object_discovery"
-launch-prefix="gdb -ex run --args"
+
 	      type="discover_objects_server" 
 	      name="rail_object_discovery" 
               output="screen">

@@ -22,6 +22,8 @@
 #include <pcl/kdtree/io.h>
 #include <pcl_ros/point_cloud.h>
 
+#include "rail_pcl_object_segmentation/pcl_measurement.hpp"
+
 #include "rail_object_discovery/NamedPointCloud2.h"
 #include "rail_object_discovery/UpdateEnvironment.h"
 
@@ -147,7 +149,7 @@ bool add_cloud_bounding_box_to_collision_environment(const rail_object_discovery
 bool update_environment_callback(rail_object_discovery::UpdateEnvironment::Request& request,
                                  rail_object_discovery::UpdateEnvironment::Response& response)
 {
-  ROS_INFO("Updating Environment");
+  ROS_INFO_STREAM("Updating Environment Service: received " << request.objects.size() << " object clouds, with " << request.centers.size() << " centers, " << request.colors.size() << " colors, " << request.radii.size() << " radii, and " << request.names.size() << " names.");
   // TODO: Filter objects out of original point cloud and publish result for static collision avoidance.
   // The intent is that the environment minus all of the discovered objects would be processed by
   // a package like collider (http://www.ros.org/wiki/collider) such that a static collision message
@@ -163,26 +165,68 @@ bool update_environment_callback(rail_object_discovery::UpdateEnvironment::Reque
 
   visualization_msgs::MarkerArray markers;
 
-  if (request.objects.size() > request.centers.size() || request.objects.size() > request.colors.size()
-	|| request.objects.size() > request.radii.size())
-  {
-    ROS_ERROR("Invalid update_environment_service request. Currently you must fully specify center, color, and radius for each cloud. Later this will be optional");
-    return false;
-  }
-
   // Name each object and add it to the planning environment
   for (std::vector<sensor_msgs::PointCloud2>::size_type i = 0; i < request.objects.size(); i++)
   {
+
+    //if any of the optional parameters weren't given for this cloud, generate them
+    if (i >= request.centers.size() || i >= request.colors.size() || i >= request.radii.size()) {
+      ROS_INFO_STREAM("Object " << i << " underdefined.");
+      //convert to pcl pointcloud
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr pclCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+      pcl::fromROSMsg(request.objects.at(i), *pclCloud);
+       //if either the center or color needs to be computed, compute them both
+       if (i >= request.centers.size() || i >= request.colors.size()) {
+         pcl::PointXYZRGB center;
+         center = rail::AveragePointCloud(pclCloud);
+         //if the center needed to be calculated, add it to the centers
+         if (i>=request.centers.size()) {
+           ROS_INFO("  Calculated center");
+           geometry_msgs::Point ros_center;
+           ros_center.x=center.x;
+           ros_center.y=center.y;
+           ros_center.z=center.z;
+           request.centers.push_back(ros_center);
+         }
+         //if the color needed to be calculated, add it to the colors
+         if (i>=request.colors.size()) {
+           ROS_INFO("  Calculated color");
+           std_msgs::ColorRGBA ros_color;
+           ros_color.r=(double)center.r;
+           ros_color.g=(double)center.g;
+           ros_color.b=(double)center.b;
+           ros_color.a=1.0;
+           request.colors.push_back(ros_color);
+         }
+       } //end center or color
+       // if the radius needs to be computed, compute it
+       if (i >= request.radii.size()) {
+         std_msgs::Float64 radius;
+         //get the center
+         pcl::PointXYZRGB center;
+         geometry_msgs::Point ros_center = request.centers.at(i);
+         center.x=ros_center.x;
+         center.y=ros_center.y;
+         center.z=ros_center.z;
+         //compute the radius from the center
+         radius.data = rail::ComputePointCloudBoundingRadiusFromPoint<pcl::PointXYZRGB>(pclCloud, center);
+         request.radii.push_back(radius);
+         ROS_INFO("  Calulated radius");
+       } //end radius calculation
+    } //end center, color, and radius calculation
+
     std::stringstream ss;
     ss << "object_" << i;
 
-    // Return named objects
+    // Name and publish the object
     rail_object_discovery::NamedPointCloud2 namedCloud;
     namedCloud.cloud = request.objects.at(i);
     namedCloud.name = ss.str();
     //publish the object cloud to its respective topic
     object_pubs[i].publish(namedCloud.cloud);
     ROS_INFO_STREAM("published an object to /extract_objects/" << ss.str());
+    //change the object's name to a user-specified name if the user has specified a name for this cloud
+    if (i<request.names.size()) namedCloud.name=request.names.at(i).data;
     response.objects.push_back(namedCloud);
 
     //add the object to the combined cloud
@@ -208,7 +252,7 @@ bool update_environment_callback(rail_object_discovery::UpdateEnvironment::Reque
     marker.color.r = 255-color.r;
     marker.color.g = 255-color.g;
     marker.color.b = 255-color.b;
-    marker.text=ss.str();
+    marker.text=namedCloud.name;
     //add the text marker to the marker array
     markers.markers.push_back(marker);
 

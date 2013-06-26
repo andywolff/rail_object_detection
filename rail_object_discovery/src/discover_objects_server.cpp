@@ -129,6 +129,8 @@ bool discover_objects_callback(rail_object_discovery::DiscoverObjects::Request &
         env_srv.request.centers.push_back(object.center);
         env_srv.request.colors.push_back(object.color);
         env_srv.request.radii.push_back(object.radius);
+        //std_msgs::String s; s.data="Mr. Duck";
+        //env_srv.request.names.push_back(s);
       }
 
       // Copy plane clouds for naming

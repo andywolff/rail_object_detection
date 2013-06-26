@@ -9,17 +9,17 @@ sensor_msgs/PointCloud2 static_environment
 # they will be filtered out as necessary.
 sensor_msgs/PointCloud2[] objects
 
-# note about optional parameters: if the size of the optional array does not match the size of the objects array, it will be ignored (for now)
+# note about optional parameters: any optional parameter not defined will be calculated from the cloud
 
 # (Optional) The name of each object
 # If not given, it will name them object_0, object_1... etc in the order they appear in objects[]
 std_msgs/String[] names
 
-# (Optional) The center of each object
+# (Optional) The center of each object (or center of the cloud)
 # If not given, it will calculate it from the cloud
 geometry_msgs/Point[] centers
 
-# (Optional) The color of each object
+# (Optional) The color of each object (or average color of the cloud)
 # If not given, it will calculate the average color of the cloud
 std_msgs/ColorRGBA[] colors
 

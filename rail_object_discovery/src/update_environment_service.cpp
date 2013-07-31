@@ -64,7 +64,7 @@ void clear() {
     marker.action = visualization_msgs::Marker::DELETE;
     markers.markers.push_back(marker);
 
-    /*//remove all potential collisionObjects
+    //remove all potential collisionObjects
     moveit_msgs::CollisionObject collision_object;
     collision_object.header.frame_id=emptyCloud.header.frame_id;
     std::stringstream ss;
@@ -72,19 +72,19 @@ void clear() {
     collision_object.id=ss.str();
     collision_object.operation=collision_object.REMOVE;
     //publish the collision_object
-    collision_object_pub.publish(collision_object);*/
+    collision_object_pub.publish(collision_object);
   }
   //publish the empty markers to clear the names
   names_pub.publish(markers);
 
   // Clear all collision objects
 //  ROS_INFO("Clearing all existing objects in planning environment.");
-  moveit_msgs::CollisionObject clearAllObjectsMsg;
+  /*moveit_msgs::CollisionObject clearAllObjectsMsg;
   clearAllObjectsMsg.operation = clearAllObjectsMsg.REMOVE;
   clearAllObjectsMsg.id = "all";
   clearAllObjectsMsg.header.stamp = ros::Time::now();
   collision_object_pub.publish(clearAllObjectsMsg);
-
+  */
   for (i=0; i<MAX_PLANES; i++) {
     //publish the empty cloud to clear the plane
     plane_pubs[i].publish(emptyCloud);
